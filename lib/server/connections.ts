@@ -1,0 +1,463 @@
+import "server-only";
+
+import { randomBytes } from "node:crypto";
+import { Api, TelegramClient } from "teleproto";
+import { StringSession } from "teleproto/sessions";
+import { computeCheck } from "teleproto/Password";
+import {
+  database,
+  decryptSecret,
+  encryptSecret,
+  type ConnectionKind,
+  type StoredConnection,
+} from "./database";
+import { saveMessage } from "./messages";
+
+type ConnectionCredentials = Record<string, string | number>;
+
+export function getConnection(id: string) {
+  return database()
+    .prepare("SELECT id, kind, label, credentials, status FROM connections WHERE id = ?")
+    .get(id) as StoredConnection | undefined;
+}
+
+export function readCredentials<T extends ConnectionCredentials>(connection: StoredConnection) {
+  return JSON.parse(decryptSecret(connection.credentials)) as T;
+}
+
+export function getConnections() {
+  return database()
+    .prepare("SELECT id, kind, label, status FROM connections ORDER BY created_at")
+    .all() as Array<{ id: string; kind: ConnectionKind; label: string; status: string }>;
+}
+
+function storeConnection(input: {
+  id?: string;
+  kind: ConnectionKind;
+  label: string;
+  credentials: ConnectionCredentials;
+  status?: string;
+}) {
+  const id = input.id ?? randomBytes(16).toString("hex");
+  database()
+    .prepare(
+      `INSERT INTO connections (id, kind, label, credentials, status)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         label = excluded.label,
+         credentials = excluded.credentials,
+         status = excluded.status`,
+    )
+    .run(
+      id,
+      input.kind,
+      input.label,
+      encryptSecret(JSON.stringify(input.credentials)),
+      input.status ?? "connected",
+    );
+  return id;
+}
+
+export async function connectWhatsAppBusiness(phoneNumberId: string, accessToken: string) {
+  if (!/^\d{5,30}$/.test(phoneNumberId) || accessToken.length < 20) {
+    throw new Error("Enter a valid WhatsApp phone number ID and access token.");
+  }
+  const version = process.env.WHATSAPP_GRAPH_API_VERSION ?? "v23.0";
+  const response = await fetch(
+    `https://graph.facebook.com/${version}/${phoneNumberId}?fields=id,display_phone_number,verified_name`,
+    { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" },
+  );
+  const result: unknown = await response.json();
+  if (!response.ok || typeof result !== "object" || result === null || !("id" in result)) {
+    throw new Error(
+      typeof result === "object" && result !== null && "error" in result
+        ? String((result.error as { message?: string }).message ?? "Meta rejected the credentials.")
+        : "Meta rejected the WhatsApp credentials.",
+    );
+  }
+
+  const data = result as { id: string; display_phone_number?: string; verified_name?: string };
+  if (data.id !== phoneNumberId)
+    throw new Error("The returned WhatsApp phone number ID did not match.");
+  const label = data.display_phone_number ?? data.verified_name ?? "WhatsApp Business";
+  return storeConnection({
+    kind: "whatsapp-business",
+    label,
+    credentials: { phoneNumberId, accessToken },
+  });
+}
+
+async function telegramBotRequest<T>(token: string, method: string, body?: unknown): Promise<T> {
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: body ? "POST" : "GET",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+    cache: "no-store",
+  });
+  const result: unknown = await response.json();
+  if (!response.ok || typeof result !== "object" || result === null || !("ok" in result)) {
+    throw new Error("Telegram Bot API request failed.");
+  }
+  const parsed = result as { ok: boolean; result?: T; description?: string };
+  if (!parsed.ok) {
+    throw new Error(parsed.description ?? "Telegram rejected the request.");
+  }
+  return parsed.result as T;
+}
+
+export async function connectTelegramBot(token: string) {
+  if (token.length < 30 || token.length > 256) throw new Error("Enter a valid Telegram bot token.");
+  const bot = await telegramBotRequest<{ id: number; username?: string }>(token, "getMe");
+  const hook = await telegramBotRequest<{ url: string }>(token, "getWebhookInfo");
+  if (hook.url) {
+    throw new Error(
+      "This bot already has a webhook configured. Remove it in your Telegram bot setup before using local polling.",
+    );
+  }
+
+  return storeConnection({
+    kind: "telegram-bot",
+    label: bot.username ? `@${bot.username}` : "Telegram bot",
+    credentials: { token, botId: bot.id, offset: 0 },
+  });
+}
+
+function telegramCredentials() {
+  const apiId = Number(process.env.TELEGRAM_API_ID);
+  const apiHash = process.env.TELEGRAM_API_HASH;
+  if (!Number.isSafeInteger(apiId) || apiId < 1 || !apiHash) {
+    throw new Error(
+      "Set TELEGRAM_API_ID and TELEGRAM_API_HASH in .env.local to connect a personal Telegram account.",
+    );
+  }
+  return { apiId, apiHash };
+}
+
+function telegramClient(session = "") {
+  const { apiId, apiHash } = telegramCredentials();
+  return new TelegramClient(new StringSession(session), apiId, apiHash, {
+    connectionRetries: 3,
+  });
+}
+
+export async function startTelegramPersonal(phoneNumber: string) {
+  const normalizedPhone = phoneNumber.replace(/[^\d+]/g, "");
+  if (!/^\+[1-9]\d{6,14}$/.test(normalizedPhone)) {
+    throw new Error("Enter a phone number in international format, for example +14155550123.");
+  }
+
+  const client = telegramClient();
+  await client.connect();
+  try {
+    const { apiId, apiHash } = telegramCredentials();
+    const sentCode = await client.invoke(
+      new Api.auth.SendCode({
+        phoneNumber: normalizedPhone,
+        apiId,
+        apiHash,
+        settings: new Api.CodeSettings({}),
+      }),
+    );
+    if (sentCode.className !== "auth.SentCode") {
+      throw new Error("Telegram did not send a login code for this account.");
+    }
+    const id = storeConnection({
+      kind: "telegram-personal",
+      label: normalizedPhone,
+      status: "pending",
+      credentials: {
+        session: client.session.save(),
+        phoneNumber: normalizedPhone,
+        phoneCodeHash: sentCode.phoneCodeHash,
+      },
+    });
+    return { id };
+  } finally {
+    await client.disconnect();
+  }
+}
+
+export async function verifyTelegramPersonal(
+  connectionId: string,
+  code: string,
+  password?: string,
+) {
+  const connection = getConnection(connectionId);
+  if (!connection || connection.kind !== "telegram-personal" || connection.status !== "pending") {
+    throw new Error("No pending personal Telegram login was found.");
+  }
+
+  const credentials = readCredentials<{
+    session: string;
+    phoneNumber: string;
+    phoneCodeHash: string;
+    apiHash?: string;
+    apiId?: number;
+  }>(connection);
+  const client = telegramClient(credentials.session);
+  await client.connect();
+  try {
+    let user: Api.User;
+    if (password) {
+      const passwordInfo = await client.invoke(new Api.account.GetPassword());
+      const passwordCheck = await computeCheck(passwordInfo, password);
+      const authorization = await client.invoke(
+        new Api.auth.CheckPassword({ password: passwordCheck }),
+      );
+      if (
+        authorization.className !== "auth.Authorization" ||
+        authorization.user.className !== "User"
+      ) {
+        throw new Error("Telegram did not authorize this account.");
+      }
+      user = authorization.user;
+    } else {
+      try {
+        const authorization = await client.invoke(
+          new Api.auth.SignIn({
+            phoneNumber: credentials.phoneNumber,
+            phoneCodeHash: credentials.phoneCodeHash,
+            phoneCode: code,
+          }),
+        );
+        if (
+          authorization.className !== "auth.Authorization" ||
+          authorization.user.className !== "User"
+        ) {
+          throw new Error(
+            "This Telegram account needs to be registered in the Telegram app first.",
+          );
+        }
+        user = authorization.user;
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("SESSION_PASSWORD_NEEDED")) {
+          return { requiresPassword: true };
+        }
+        throw error;
+      }
+    }
+
+    database()
+      .prepare(
+        "UPDATE connections SET label = ?, credentials = ?, status = 'connected' WHERE id = ?",
+      )
+      .run(
+        [user.firstName, user.lastName].filter(Boolean).join(" ") || connection.label,
+        encryptSecret(
+          JSON.stringify({
+            session: client.session.save(),
+            telegramUserId: user.id.toString(),
+          }),
+        ),
+        connectionId,
+      );
+    return { requiresPassword: false };
+  } finally {
+    await client.disconnect();
+  }
+}
+
+export async function syncTelegramPersonal(connection: StoredConnection) {
+  const credentials = readCredentials<{ session: string }>(connection);
+  const client = telegramClient(credentials.session);
+  await client.connect();
+  try {
+    if (!(await client.checkAuthorization())) {
+      throw new Error("The personal Telegram session expired. Reconnect this account.");
+    }
+    const dialogs = await client.getDialogs({ limit: 50 });
+    for (const dialog of dialogs) {
+      if (!dialog.id || !dialog.inputEntity) continue;
+      const providerChatId = dialog.id.toString();
+      const saved = database()
+        .prepare(
+          `SELECT MAX(CAST(m.provider_message_id AS INTEGER)) AS lastMessageId
+           FROM messages m
+           JOIN conversations c ON c.id = m.conversation_id
+           WHERE c.connection_id = ? AND c.provider_chat_id = ?`,
+        )
+        .get(connection.id, providerChatId) as { lastMessageId: number | null };
+      const lastMessageId = saved.lastMessageId ?? 0;
+      if (dialog.message?.id && dialog.message.id <= lastMessageId) continue;
+
+      const entity = dialog.entity;
+      const handle =
+        entity && "username" in entity && typeof entity.username === "string"
+          ? `@${entity.username}`
+          : entity && "phone" in entity && typeof entity.phone === "string"
+            ? entity.phone
+            : "";
+      for await (const message of client.iterMessages(dialog.inputEntity, {
+        minId: lastMessageId,
+      })) {
+        if (!message.id || message.id <= lastMessageId) continue;
+        if (!message.message) {
+          console.warn(`Ignoring unsupported personal Telegram message ${message.id}.`);
+          continue;
+        }
+        saveMessage({
+          connectionId: connection.id,
+          providerChatId,
+          title: dialog.title ?? dialog.name ?? "Telegram chat",
+          handle,
+          providerMessageId: String(message.id),
+          body: message.message,
+          direction: message.out ? "outbound" : "inbound",
+          createdAt: Number(message.date) * 1000,
+        });
+      }
+    }
+  } finally {
+    await client.disconnect();
+  }
+}
+
+export async function sendTelegramPersonal(
+  connection: StoredConnection,
+  providerChatId: string,
+  body: string,
+) {
+  const credentials = readCredentials<{ session: string }>(connection);
+  const client = telegramClient(credentials.session);
+  await client.connect();
+  try {
+    const dialogs = await client.getDialogs({ limit: 100 });
+    const dialog = dialogs.find((item) => item.id?.toString() === providerChatId);
+    if (!dialog) throw new Error("Telegram conversation not found in the connected account.");
+    const sent = await dialog.send(body);
+    saveMessage({
+      connectionId: connection.id,
+      providerChatId,
+      title: dialog.title ?? dialog.name ?? "Telegram chat",
+      providerMessageId: String(sent.id),
+      body,
+      direction: "outbound",
+      createdAt: Number(sent.date) * 1000,
+    });
+    return String(sent.id);
+  } finally {
+    await client.disconnect();
+  }
+}
+
+export async function sendTelegramBot(
+  connection: StoredConnection,
+  providerChatId: string,
+  body: string,
+) {
+  const credentials = readCredentials<{ token: string }>(connection);
+  const result = await telegramBotRequest<{ message_id: number; date: number }>(
+    credentials.token,
+    "sendMessage",
+    { chat_id: providerChatId, text: body },
+  );
+  return result;
+}
+
+export async function sendWhatsAppBusiness(
+  connection: StoredConnection,
+  recipient: string,
+  body: string,
+) {
+  const credentials = readCredentials<{ accessToken: string; phoneNumberId: string }>(connection);
+  const version = process.env.WHATSAPP_GRAPH_API_VERSION ?? "v23.0";
+  const response = await fetch(
+    `https://graph.facebook.com/${version}/${credentials.phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${credentials.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: recipient,
+        type: "text",
+        text: { body },
+      }),
+      cache: "no-store",
+    },
+  );
+  const result: unknown = await response.json();
+  if (
+    !response.ok ||
+    typeof result !== "object" ||
+    result === null ||
+    !("messages" in result) ||
+    !Array.isArray(result.messages) ||
+    typeof result.messages[0]?.id !== "string"
+  ) {
+    const message =
+      typeof result === "object" && result !== null && "error" in result
+        ? String((result.error as { message?: string }).message ?? "WhatsApp delivery failed.")
+        : "WhatsApp delivery failed.";
+    throw new Error(message);
+  }
+  return result.messages[0].id as string;
+}
+
+export async function pollTelegramBot(connection: StoredConnection) {
+  const credentials = readCredentials<{ token: string; offset: number }>(connection);
+  const updates = await telegramBotRequest<
+    Array<{
+      update_id: number;
+      message?: {
+        message_id: number;
+        date: number;
+        text?: string;
+        chat: { id: number; title?: string; username?: string; first_name?: string };
+        from?: { username?: string; first_name?: string; last_name?: string };
+      };
+    }>
+  >(credentials.token, "getUpdates", {
+    offset: credentials.offset,
+    timeout: 0,
+    allowed_updates: ["message"],
+  });
+
+  let nextOffset = credentials.offset;
+  for (const update of updates) {
+    nextOffset = Math.max(nextOffset, update.update_id + 1);
+    const message = update.message;
+    if (!message) continue;
+    if (!message.text) {
+      console.warn(`Ignoring unsupported Telegram bot message ${message.message_id}.`);
+      continue;
+    }
+    const name =
+      message.chat.title ||
+      [message.from?.first_name, message.from?.last_name].filter(Boolean).join(" ") ||
+      (message.from?.username ? `@${message.from.username}` : String(message.chat.id));
+    saveMessage({
+      connectionId: connection.id,
+      providerChatId: String(message.chat.id),
+      title: name,
+      handle: message.from?.username ? `@${message.from.username}` : "",
+      providerMessageId: String(message.message_id),
+      body: message.text,
+      direction: "inbound",
+      createdAt: message.date * 1000,
+    });
+  }
+
+  if (nextOffset !== credentials.offset) {
+    database()
+      .prepare("UPDATE connections SET credentials = ? WHERE id = ?")
+      .run(encryptSecret(JSON.stringify({ ...credentials, offset: nextOffset })), connection.id);
+  }
+}
+
+export async function disconnectConnection(connection: StoredConnection) {
+  if (connection.kind === "telegram-personal" && connection.status === "connected") {
+    const credentials = readCredentials<{ session: string }>(connection);
+    const client = telegramClient(credentials.session);
+    await client.connect();
+    try {
+      await client.logOut();
+    } finally {
+      await client.disconnect();
+    }
+  }
+  database().prepare("DELETE FROM connections WHERE id = ?").run(connection.id);
+}
