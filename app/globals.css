@@ -773,6 +773,50 @@ a {
   overflow-wrap: anywhere;
 }
 
+.message-image {
+  display: block;
+  width: min(100%, 360px);
+  height: auto;
+  max-height: 260px;
+  margin: -2px 0 8px;
+  border-radius: 7px;
+  object-fit: cover;
+}
+
+.message-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  color: #9a9eaa;
+  font-size: 8px;
+}
+
+.message-delete {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #b15b63;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.message-delete:hover {
+  color: #8f3540;
+  text-decoration: underline;
+}
+
+.message-delete:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
 .message-row.outbound .message-bubble {
   border-color: #e3dfff;
   border-radius: 10px 3px 10px 10px;
@@ -804,10 +848,40 @@ a {
   display: flex;
   min-height: 38px;
   align-items: center;
-  justify-content: space-between;
+  gap: 9px;
   border-top: 1px solid #f0f1f4;
   padding: 5px 8px 5px 10px;
   color: #9297a4;
+  font-size: 9px;
+}
+
+.reply-footer > span {
+  flex: 1;
+}
+
+.attach-button {
+  min-height: 29px;
+  border: 1px solid #e2e4ea;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0 9px;
+  color: #666b78;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.attach-button:hover {
+  border-color: #cfc8f4;
+  background: #faf9ff;
+  color: var(--purple);
+}
+
+.attachment-preview {
+  margin: 8px 10px 0;
+  border-radius: 5px;
+  background: #f5f3ff;
+  padding: 6px 8px;
+  color: #6655cf;
   font-size: 9px;
 }
 

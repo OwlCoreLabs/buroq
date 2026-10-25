@@ -1,4 +1,4 @@
-import type { FormEvent } from "react";
+import type { SubmitEvent } from "react";
 
 type DeleteAccountModalProps = {
   busy: boolean;
@@ -6,7 +6,7 @@ type DeleteAccountModalProps = {
   deleteError: string;
   onClose: () => void;
   onDeletePasswordChange: (value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSubmit: (event: SubmitEvent<HTMLFormElement>) => void;
 };
 
 export function DeleteAccountModal({

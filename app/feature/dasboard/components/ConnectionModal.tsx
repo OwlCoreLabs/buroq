@@ -1,4 +1,4 @@
-import type { FormEvent } from "react";
+import type { SubmitEvent } from "react";
 
 import { channelLabels, type ChannelKind } from "@/lib/inbox";
 
@@ -9,7 +9,7 @@ type ConnectionModalProps = {
   telegramPendingId: string;
   telegramNeedsPassword: boolean;
   onClose: () => void;
-  onSubmitConnection: (event: FormEvent<HTMLFormElement>) => void;
+  onSubmitConnection: (event: SubmitEvent<HTMLFormElement>) => void;
 };
 
 export function ConnectionModal({

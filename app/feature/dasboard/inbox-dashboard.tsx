@@ -37,6 +37,7 @@ export default function InboxDashboard({ username }: { username: string }) {
     refresh,
     submitConnection,
     sendReply,
+    deleteMessage,
     signOut,
     deleteAccount,
     disconnect,
@@ -99,6 +100,7 @@ export default function InboxDashboard({ username }: { username: string }) {
               busy={busy}
               onReplyChange={setReply}
               onSendReply={sendReply}
+              onDeleteMessage={deleteMessage}
             />
           </section>
 

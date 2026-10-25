@@ -2,8 +2,9 @@ import "server-only";
 
 import { randomBytes } from "node:crypto";
 import { Api, TelegramClient } from "teleproto";
-import { StringSession } from "teleproto/sessions";
+import { CustomFile } from "teleproto/client/uploads";
 import { computeCheck } from "teleproto/Password";
+import { StringSession } from "teleproto/sessions";
 import {
   database,
   decryptSecret,
@@ -11,6 +12,7 @@ import {
   type ConnectionKind,
   type StoredConnection,
 } from "./database";
+import { saveImage } from "./media";
 import { saveMessage } from "./messages";
 
 type ConnectionCredentials = Record<string, string | number>;
@@ -291,19 +293,23 @@ export async function syncTelegramPersonal(connection: StoredConnection) {
         minId: lastMessageId,
       })) {
         if (!message.id || message.id <= lastMessageId) continue;
-        if (!message.message) {
-          console.warn(`Ignoring unsupported personal Telegram message ${message.id}.`);
-          continue;
-        }
+        const media = message.media ? await client.downloadMedia(message, {}) : undefined;
+        const mediaBuffer = Buffer.isBuffer(media) ? media : undefined;
+        const mediaMimeType = mediaBuffer ? "image/jpeg" : undefined;
+        const mediaPath =
+          mediaBuffer && mediaMimeType ? await saveImage(mediaBuffer, mediaMimeType) : undefined;
         saveMessage({
           connectionId: connection.id,
           providerChatId,
           title: dialog.title ?? dialog.name ?? "Telegram chat",
           handle,
           providerMessageId: String(message.id),
-          body: message.message,
+          body: message.message || (mediaPath ? "Image" : ""),
           direction: message.out ? "outbound" : "inbound",
           createdAt: Number(message.date) * 1000,
+          mediaUrl: mediaPath,
+          mediaMimeType,
+          mediaName: mediaPath ? "image" : undefined,
         });
       }
     }
@@ -316,6 +322,11 @@ export async function sendTelegramPersonal(
   connection: StoredConnection,
   providerChatId: string,
   body: string,
+  image?: File | null,
+  deleteProviderMessageId?: string,
+  mediaPath?: string,
+  mediaMimeType?: string,
+  mediaName?: string,
 ) {
   const credentials = readCredentials<{ session: string }>(connection);
   const client = telegramClient(credentials.session);
@@ -324,15 +335,35 @@ export async function sendTelegramPersonal(
     const dialogs = await client.getDialogs({ limit: 100 });
     const dialog = dialogs.find((item) => item.id?.toString() === providerChatId);
     if (!dialog) throw new Error("Telegram conversation not found in the connected account.");
-    const sent = await dialog.send(body);
+    if (deleteProviderMessageId) {
+      await client.deleteMessages(dialog.inputEntity, [Number(deleteProviderMessageId)], {
+        revoke: true,
+      });
+      return deleteProviderMessageId;
+    }
+
+    const sent = image
+      ? await client.sendFile(dialog.inputEntity, {
+          file: new CustomFile(
+            image.name || "image",
+            image.size,
+            "",
+            Buffer.from(await image.arrayBuffer()),
+          ),
+          caption: body || undefined,
+        })
+      : await dialog.send(body);
     saveMessage({
       connectionId: connection.id,
       providerChatId,
       title: dialog.title ?? dialog.name ?? "Telegram chat",
       providerMessageId: String(sent.id),
-      body,
+      body: body || (mediaName ?? "Image"),
       direction: "outbound",
       createdAt: Number(sent.date) * 1000,
+      mediaUrl: mediaPath,
+      mediaMimeType,
+      mediaName,
     });
     return String(sent.id);
   } finally {
@@ -352,6 +383,88 @@ export async function sendTelegramBot(
     { chat_id: providerChatId, text: body },
   );
   return result;
+}
+
+export async function sendTelegramBotImage(
+  connection: StoredConnection,
+  providerChatId: string,
+  image: File,
+  caption: string,
+) {
+  const credentials = readCredentials<{ token: string }>(connection);
+  const formData = new FormData();
+  formData.set("chat_id", providerChatId);
+  formData.set("photo", image, image.name || "image");
+  if (caption) formData.set("caption", caption);
+
+  const response = await fetch(`https://api.telegram.org/bot${credentials.token}/sendPhoto`, {
+    method: "POST",
+    body: formData,
+    cache: "no-store",
+  });
+  const result = (await response.json()) as {
+    ok?: boolean;
+    result?: { message_id: number; date: number };
+    description?: string;
+  };
+  if (!response.ok || !result.ok || !result.result) {
+    throw new Error(result.description ?? "Telegram rejected the image.");
+  }
+  return result.result;
+}
+
+export async function sendWhatsAppBusinessImage(
+  connection: StoredConnection,
+  recipient: string,
+  image: File,
+  caption: string,
+) {
+  const credentials = readCredentials<{ accessToken: string; phoneNumberId: string }>(connection);
+  const version = process.env.WHATSAPP_GRAPH_API_VERSION ?? "v23.0";
+  const mediaForm = new FormData();
+  mediaForm.set("messaging_product", "whatsapp");
+  mediaForm.set("type", image.type);
+  mediaForm.set("file", image, image.name || "image");
+  const mediaResponse = await fetch(
+    `https://graph.facebook.com/${version}/${credentials.phoneNumberId}/media`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      body: mediaForm,
+      cache: "no-store",
+    },
+  );
+  const mediaResult = (await mediaResponse.json()) as { id?: string; error?: { message?: string } };
+  if (!mediaResponse.ok || !mediaResult.id) {
+    throw new Error(mediaResult.error?.message ?? "WhatsApp rejected the image upload.");
+  }
+
+  const response = await fetch(
+    `https://graph.facebook.com/${version}/${credentials.phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${credentials.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: recipient,
+        type: "image",
+        image: { id: mediaResult.id, ...(caption ? { caption } : {}) },
+      }),
+      cache: "no-store",
+    },
+  );
+  const result = (await response.json()) as {
+    messages?: Array<{ id?: string }>;
+    error?: { message?: string };
+  };
+  if (!response.ok || !result.messages?.[0]?.id) {
+    throw new Error(result.error?.message ?? "WhatsApp rejected the image message.");
+  }
+  return result.messages[0].id;
 }
 
 export async function sendWhatsAppBusiness(

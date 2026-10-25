@@ -8,7 +8,7 @@ type InboxResult = {
   syncWarnings?: string[];
 };
 
-export type InboxFilter = "all" | ChannelKind;
+export type InboxFilter = "all" | string;
 
 type InboxState = {
   connections: ChannelConnection[];

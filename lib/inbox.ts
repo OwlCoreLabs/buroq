@@ -6,6 +6,9 @@ export type Message = {
   body: string;
   direction: "inbound" | "outbound";
   createdAt: number;
+  mediaUrl?: string;
+  mediaMimeType?: string;
+  mediaName?: string;
 };
 
 export type Conversation = {

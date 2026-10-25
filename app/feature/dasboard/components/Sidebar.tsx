@@ -5,9 +5,9 @@ import { channelLabels, type ChannelConnection, type ChannelKind } from "@/lib/i
 type SidebarProps = {
   username: string;
   connections: ChannelConnection[];
-  activeFilter: "all" | ChannelKind;
+  activeFilter: "all" | string;
   onOpenConnect: (kind: ChannelKind) => void;
-  onSelectFilter: (nextFilter: "all" | ChannelKind) => void;
+  onSelectFilter: (nextFilter: "all" | string) => void;
   onDisconnect: (connection: ChannelConnection) => void;
   onSignOut: () => void;
   onDeleteAccount: () => void;
@@ -52,10 +52,10 @@ export function Sidebar({
               {connection.kind === "whatsapp-business" ? "W" : "➤"}
             </span>
             <button
-              className={`account-filter ${activeFilter === connection.kind ? "active" : ""}`}
+              className={`account-filter ${activeFilter === connection.id ? "active" : ""}`}
               type="button"
               onClick={() =>
-                onSelectFilter(activeFilter === connection.kind ? "all" : connection.kind)
+                onSelectFilter(activeFilter === connection.id ? "all" : connection.id)
               }
             >
               <span>{connection.label}</span>

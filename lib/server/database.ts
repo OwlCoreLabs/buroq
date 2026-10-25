@@ -67,12 +67,25 @@ function getDatabase() {
       body TEXT NOT NULL,
       direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
       created_at INTEGER NOT NULL,
+      media_url TEXT,
+      media_mime_type TEXT,
+      media_name TEXT,
       UNIQUE(conversation_id, provider_message_id)
     );
   `);
   const userColumns = database.pragma("table_info(users)") as { name: string }[];
   if (!userColumns.some((column) => column.name === "recovery_code_hash")) {
     database.exec("ALTER TABLE users ADD COLUMN recovery_code_hash TEXT");
+  }
+  const messageColumns = database.pragma("table_info(messages)") as { name: string }[];
+  if (!messageColumns.some((column) => column.name === "media_url")) {
+    database.exec("ALTER TABLE messages ADD COLUMN media_url TEXT");
+  }
+  if (!messageColumns.some((column) => column.name === "media_mime_type")) {
+    database.exec("ALTER TABLE messages ADD COLUMN media_mime_type TEXT");
+  }
+  if (!messageColumns.some((column) => column.name === "media_name")) {
+    database.exec("ALTER TABLE messages ADD COLUMN media_name TEXT");
   }
   chmodSync(path.join(dataDirectory, "buroq.sqlite"), 0o600);
   globalThis.buroqDatabase = database;

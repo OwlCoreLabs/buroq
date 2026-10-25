@@ -1,4 +1,4 @@
-import { channelLabels, type ChannelConnection, type ChannelKind, type Conversation } from "@/lib/inbox";
+import { channelLabels, type ChannelConnection, type Conversation } from "@/lib/inbox";
 
 import { formatTime } from "./common";
 
@@ -7,10 +7,10 @@ type ConversationListProps = {
   conversations: Conversation[];
   loading: boolean;
   selectedId: number | null;
-  activeFilter: "all" | ChannelKind;
+  activeFilter: "all" | string;
   search: string;
   onSearchChange: (value: string) => void;
-  onSetActiveFilter: (value: "all" | ChannelKind) => void;
+  onSetActiveFilter: (value: "all" | string) => void;
   onSelectConversation: (conversation: Conversation) => void;
 };
 
@@ -56,12 +56,12 @@ export function ConversationList({
         </button>
         {connections.map((connection) => (
           <button
-            className={`filter-tab ${activeFilter === connection.kind ? "active" : ""}`}
+            className={`filter-tab ${activeFilter === connection.id ? "active" : ""}`}
             key={connection.id}
             type="button"
             role="tab"
-            aria-selected={activeFilter === connection.kind}
-            onClick={() => onSetActiveFilter(connection.kind)}
+            aria-selected={activeFilter === connection.id}
+            onClick={() => onSetActiveFilter(connection.id)}
           >
             {connection.label}
           </button>

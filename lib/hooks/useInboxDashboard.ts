@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type FormEvent } from "react";
+import { useEffect, useMemo, type SubmitEvent } from "react";
 import { useRouter } from "next/navigation";
 import { io } from "socket.io-client";
 
@@ -70,13 +70,14 @@ export function useInboxDashboard() {
   const visibleConversations = useMemo(() => {
     const term = search.trim().toLowerCase();
     return conversations.filter((conversation) => {
-      const matchesChannel = activeFilter === "all" || conversation.channel === activeFilter;
+      const matchesConnection =
+        activeFilter === "all" || conversation.connectionId === activeFilter;
       const matchesSearch =
         !term ||
         conversation.title.toLowerCase().includes(term) ||
         conversation.handle.toLowerCase().includes(term) ||
         conversation.preview.toLowerCase().includes(term);
-      return matchesChannel && matchesSearch;
+      return matchesConnection && matchesSearch;
     });
   }, [activeFilter, conversations, search]);
 
@@ -93,7 +94,7 @@ export function useInboxDashboard() {
     setTelegramNeedsPassword(false);
   }
 
-  async function submitConnection(event: FormEvent<HTMLFormElement>) {
+  async function submitConnection(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!modalKind) return;
 
@@ -158,18 +159,22 @@ export function useInboxDashboard() {
     }
   }
 
-  async function sendReply(event: FormEvent<HTMLFormElement>) {
+  async function sendReply(event: SubmitEvent<HTMLFormElement>, image?: File) {
     event.preventDefault();
-    if (!selectedConversation || !reply.trim()) return;
+    if (!selectedConversation || (!reply.trim() && !image)) return false;
 
     setBusy(true);
     setError("");
 
     try {
+      const formData = new FormData();
+      formData.set("conversationId", String(selectedConversation.id));
+      formData.set("body", reply.trim());
+      if (image) formData.set("image", image);
+
       const response = await fetch("/api/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: selectedConversation.id, body: reply.trim() }),
+        body: formData,
       });
 
       const result = (await response.json()) as { error?: string };
@@ -177,8 +182,26 @@ export function useInboxDashboard() {
 
       setReply("");
       await refresh();
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Message could not be sent.");
+    } finally {
+      setBusy(false);
+    }
+    return false;
+  }
+
+  async function deleteMessage(messageId: number) {
+    if (!window.confirm("Delete this sent message?")) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/messages/${messageId}`, { method: "DELETE" });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Message could not be deleted.");
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Message could not be deleted.");
     } finally {
       setBusy(false);
     }
@@ -189,7 +212,7 @@ export function useInboxDashboard() {
     router.refresh();
   }
 
-  async function deleteAccount(event: FormEvent<HTMLFormElement>) {
+  async function deleteAccount(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setDeleteError("");
@@ -267,6 +290,7 @@ export function useInboxDashboard() {
     refresh,
     submitConnection,
     sendReply,
+    deleteMessage,
     signOut,
     deleteAccount,
     disconnect,

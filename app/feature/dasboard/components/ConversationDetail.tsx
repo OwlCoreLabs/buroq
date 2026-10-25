@@ -1,4 +1,5 @@
-import type { FormEvent } from "react";
+import Image from "next/image";
+import { useRef, useState, type SubmitEvent } from "react";
 
 import { channelLabels, type Conversation } from "@/lib/inbox";
 
@@ -9,7 +10,8 @@ type ConversationDetailProps = {
   reply: string;
   busy: boolean;
   onReplyChange: (value: string) => void;
-  onSendReply: (event: FormEvent<HTMLFormElement>) => void;
+  onSendReply: (event: SubmitEvent<HTMLFormElement>, image?: File) => Promise<boolean>;
+  onDeleteMessage: (messageId: number) => void;
 };
 
 export function ConversationDetail({
@@ -18,7 +20,19 @@ export function ConversationDetail({
   busy,
   onReplyChange,
   onSendReply,
+  onDeleteMessage,
 }: ConversationDetailProps) {
+  const imageInput = useRef<HTMLInputElement>(null);
+  const [image, setImage] = useState<File | null>(null);
+
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const sent = await onSendReply(event, image ?? undefined);
+    if (!sent) return;
+    setImage(null);
+    if (imageInput.current) imageInput.current.value = "";
+  }
+
   if (!conversation) {
     return (
       <div className="conversation-detail">
@@ -52,13 +66,41 @@ export function ConversationDetail({
                 <strong>{message.direction === "outbound" ? "You" : conversation.title}</strong>
                 <time>{formatTime(message.createdAt)}</time>
               </div>
-              <div className="message-bubble">{message.body}</div>
+              <div className="message-bubble">
+                {message.mediaUrl && (
+                  <Image
+                    className="message-image"
+                    src={message.mediaUrl}
+                    alt={message.mediaName ?? "Attached image"}
+                    width={360}
+                    height={270}
+                    unoptimized
+                  />
+                )}
+                {message.body && <p className="message-text">{message.body}</p>}
+                <div className="message-actions">
+                  <span className="message-status">
+                    {message.direction === "outbound" ? "Sent" : "Received"}
+                  </span>
+                  {message.direction === "outbound" && (
+                    <button
+                      className="message-delete"
+                      type="button"
+                      onClick={() => onDeleteMessage(message.id)}
+                      disabled={busy}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         ))}
       </div>
 
-      <form className="reply-box" onSubmit={onSendReply}>
+      <form className="reply-box" onSubmit={handleSubmit}>
+        {image && <p className="attachment-preview">{image.name}</p>}
         <textarea
           aria-label="Write a reply"
           placeholder={`Reply to ${conversation.title}…`}
@@ -67,8 +109,26 @@ export function ConversationDetail({
           maxLength={4096}
         />
         <div className="reply-footer">
+          <input
+            ref={imageInput}
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            hidden
+            onChange={(event) => setImage(event.target.files?.[0] ?? null)}
+          />
+          <button
+            className="attach-button"
+            type="button"
+            onClick={() => imageInput.current?.click()}
+          >
+            Image
+          </button>
           <span>Replies send via {channelLabels[conversation.channel]}</span>
-          <button className="send-button" type="submit" disabled={busy || !reply.trim()}>
+          <button
+            className="send-button"
+            type="submit"
+            disabled={busy || (!reply.trim() && !image)}
+          >
             {busy ? "Sending…" : "Send"}
           </button>
         </div>
