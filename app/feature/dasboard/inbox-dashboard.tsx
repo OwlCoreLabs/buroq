@@ -1,16 +1,24 @@
 "use client";
 
+import { useState, type SubmitEvent } from "react";
+
 import { useInboxDashboard } from "@/lib/hooks/useInboxDashboard";
+import type { ChannelConnection } from "@/lib/inbox";
 
 import { ConnectionModal } from "./components/ConnectionModal";
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { ConversationDetail } from "./components/ConversationDetail";
 import { ConversationList } from "./components/ConversationList";
 import { DeleteAccountModal } from "./components/DeleteAccountModal";
+import { NgrokModal } from "./components/NgrokModal";
+import { NgrokTunnelCard } from "./components/NgrokTunnelCard";
 import { Sidebar } from "./components/Sidebar";
+import { TelegramMessageModal } from "./components/TelegramMessageModal";
 import { TopBar } from "./components/TopBar";
 
 export default function InboxDashboard({ username }: { username: string }) {
+  const [telegramMessageConnection, setTelegramMessageConnection] =
+    useState<ChannelConnection | null>(null);
   const {
     connections,
     conversations,
@@ -41,11 +49,52 @@ export default function InboxDashboard({ username }: { username: string }) {
     signOut,
     deleteAccount,
     disconnect,
+    deleteConversation,
+    deletingConversationId,
     selectConversation,
     selectedConversation,
     openConnectionModal,
     resetConnectionFlow,
+    setError,
+    ngrokStatus,
+    ngrokLoading,
+    ngrokModalOpen,
+    setNgrokModalOpen,
+    startNgrok,
+    stopNgrok,
+    syncTelegramWebhooks,
+    saveWebhookSettings,
+    testWhatsAppWebhook,
   } = useInboxDashboard();
+
+  function startTelegramMessage(connection: ChannelConnection) {
+    setError("");
+    setTelegramMessageConnection(connection);
+  }
+
+  async function submitTelegramMessage(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!telegramMessageConnection) return;
+    const formData = new FormData(event.currentTarget);
+    setError("");
+    const response = await fetch("/api/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        connectionId: telegramMessageConnection.id,
+        providerChatId: formData.get("providerChatId"),
+        recipientTitle: formData.get("recipientTitle"),
+        body: formData.get("body"),
+      }),
+    });
+    const result = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(result.error ?? "Message could not be sent.");
+      return;
+    }
+    setTelegramMessageConnection(null);
+    await refresh();
+  }
 
   return (
     <main className="app-shell">
@@ -65,7 +114,12 @@ export default function InboxDashboard({ username }: { username: string }) {
       />
 
       <section className="content">
-        <TopBar onRefresh={refresh} onOpenConnect={openConnectionModal} />
+        <TopBar
+          onRefresh={refresh}
+          onOpenConnect={openConnectionModal}
+          ngrokStatus={ngrokStatus}
+          onOpenNgrokModal={() => setNgrokModalOpen(true)}
+        />
 
         <div className="page-content">
           <div className="page-heading">
@@ -76,10 +130,23 @@ export default function InboxDashboard({ username }: { username: string }) {
             </div>
           </div>
 
+          <NgrokTunnelCard
+            status={ngrokStatus}
+            loading={ngrokLoading}
+            onStart={async () => {
+              await startNgrok();
+            }}
+            onStop={async () => {
+              await stopNgrok();
+            }}
+            onOpenModal={() => setNgrokModalOpen(true)}
+          />
+
           <ConnectionPanel
             connections={connections}
             onOpenConnectionModal={openConnectionModal}
             onResetConnectionFlow={resetConnectionFlow}
+            onStartTelegramMessage={startTelegramMessage}
           />
 
           <section className="inbox-panel" aria-label="Messages">
@@ -93,6 +160,8 @@ export default function InboxDashboard({ username }: { username: string }) {
               onSearchChange={setSearch}
               onSetActiveFilter={setActiveFilter}
               onSelectConversation={selectConversation}
+              onDeleteConversation={deleteConversation}
+              deletingConversationId={deletingConversationId}
             />
             <ConversationDetail
               conversation={selectedConversation}
@@ -111,6 +180,16 @@ export default function InboxDashboard({ username }: { username: string }) {
           )}
         </div>
       </section>
+
+      {telegramMessageConnection && (
+        <TelegramMessageModal
+          connection={telegramMessageConnection}
+          busy={busy}
+          error={error}
+          onClose={() => setTelegramMessageConnection(null)}
+          onSubmit={submitTelegramMessage}
+        />
+      )}
 
       {modalKind && (
         <ConnectionModal
@@ -132,6 +211,19 @@ export default function InboxDashboard({ username }: { username: string }) {
           onClose={() => setDeleteAccountOpen(false)}
           onDeletePasswordChange={setDeletePassword}
           onSubmit={deleteAccount}
+        />
+      )}
+
+      {ngrokModalOpen && (
+        <NgrokModal
+          status={ngrokStatus}
+          loading={ngrokLoading}
+          onClose={() => setNgrokModalOpen(false)}
+          onStart={startNgrok}
+          onStop={stopNgrok}
+          onSyncBots={syncTelegramWebhooks}
+          onSaveSettings={saveWebhookSettings}
+          onTestWhatsApp={testWhatsAppWebhook}
         />
       )}
     </main>

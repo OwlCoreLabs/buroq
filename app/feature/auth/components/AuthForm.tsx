@@ -80,7 +80,9 @@ export function AuthForm({
         <label>
           {mode === "recover" ? "New password" : "Password"}
           <input
-            autoComplete={mode === "setup" || mode === "recover" ? "new-password" : "current-password"}
+            autoComplete={
+              mode === "setup" || mode === "recover" ? "new-password" : "current-password"
+            }
             type="password"
             required
             minLength={mode === "setup" || mode === "recover" ? 1 : undefined}
@@ -110,12 +112,20 @@ export function AuthForm({
         </button>
       </form>
       {mode === "login" && (
-        <button className="text-button auth-link" type="button" onClick={() => onChangeMode("recover")}>
+        <button
+          className="text-button auth-link"
+          type="button"
+          onClick={() => onChangeMode("recover")}
+        >
           Forgot password?
         </button>
       )}
       {mode === "recover" && (
-        <button className="text-button auth-link" type="button" onClick={() => onChangeMode("login")}>
+        <button
+          className="text-button auth-link"
+          type="button"
+          onClick={() => onChangeMode("login")}
+        >
           Back to sign in
         </button>
       )}

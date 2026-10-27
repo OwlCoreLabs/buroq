@@ -6,12 +6,14 @@ type ConnectionPanelProps = {
   connections: ChannelConnection[];
   onOpenConnectionModal: (kind: ChannelKind) => void;
   onResetConnectionFlow: () => void;
+  onStartTelegramMessage: (connection: ChannelConnection) => void;
 };
 
 export function ConnectionPanel({
   connections,
   onOpenConnectionModal,
   onResetConnectionFlow,
+  onStartTelegramMessage,
 }: ConnectionPanelProps) {
   return (
     <section className="connection-panel" aria-label="Connect messaging accounts">
@@ -27,7 +29,7 @@ export function ConnectionPanel({
             <span className={`channel-icon large ${kind}`}>
               {kind === "whatsapp-business" ? "W" : "➤"}
             </span>
-            <div className="connection-option-copy"> 
+            <div className="connection-option-copy">
               <strong>{channelLabels[kind]}</strong>
               <span>
                 {connections.some((connection) => connection.kind === kind)
@@ -39,11 +41,20 @@ export function ConnectionPanel({
               className="connect-button"
               type="button"
               onClick={() => {
+                const connection = connections.find((item) => item.kind === kind);
+                if (kind === "telegram-bot" && connection) {
+                  onStartTelegramMessage(connection);
+                  return;
+                }
                 onResetConnectionFlow();
                 onOpenConnectionModal(kind);
               }}
             >
-              {connections.some((connection) => connection.kind === kind) ? "Add account" : "Connect"}
+              {kind === "telegram-bot" && connections.some((connection) => connection.kind === kind)
+                ? "New message"
+                : connections.some((connection) => connection.kind === kind)
+                  ? "Add account"
+                  : "Connect"}
             </button>
           </article>
         ))}

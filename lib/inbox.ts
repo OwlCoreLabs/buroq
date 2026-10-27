@@ -36,3 +36,35 @@ export const channelLabels: Record<ChannelKind, string> = {
   "telegram-bot": "Telegram bot",
   "telegram-personal": "Telegram personal",
 };
+
+export type TelegramBotWebhookInfo = {
+  id: string;
+  label: string;
+  webhookUrl: string | null;
+  synced: boolean;
+  pendingUpdateCount?: number;
+  lastError?: string;
+};
+
+export type NgrokStatus = {
+  active: boolean;
+  status: "inactive" | "starting" | "active" | "error";
+  publicUrl: string | null;
+  port: number;
+  startedAt: string | null;
+  error?: string | null;
+  isExternal?: boolean;
+  whatsapp: {
+    url: string | null;
+    verifyToken: string;
+    appSecretConfigured: boolean;
+    verifyTokenConfigured: boolean;
+  };
+  telegram: {
+    urlTemplate: string | null;
+    secretConfigured: boolean;
+    secret?: string;
+    botsCount: number;
+    bots: TelegramBotWebhookInfo[];
+  };
+};

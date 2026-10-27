@@ -3,9 +3,10 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { database } from "@/lib/server/database";
 import { readCredentials } from "@/lib/server/connections";
 import { saveMessage } from "@/lib/server/messages";
+import { getWhatsAppAppSecret, getWhatsAppVerifyToken } from "@/lib/server/ngrok";
 
 export async function GET(request: Request) {
-  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+  const verifyToken = getWhatsAppVerifyToken();
   if (!verifyToken) {
     return NextResponse.json(
       { error: "WhatsApp webhook verification is not configured." },
@@ -24,7 +25,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  const appSecret = getWhatsAppAppSecret();
   if (!appSecret) {
     return NextResponse.json(
       { error: "WhatsApp webhook signature validation is not configured." },

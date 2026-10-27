@@ -25,8 +25,19 @@ export function DeleteAccountModal({
         if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
-      <section className="connect-modal" role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
-        <button className="modal-close" type="button" aria-label="Close" onClick={onClose} disabled={busy}>
+      <section
+        className="connect-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-account-title"
+      >
+        <button
+          className="modal-close"
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          disabled={busy}
+        >
           ×
         </button>
         <p className="eyebrow">PERMANENT ACTION</p>

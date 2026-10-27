@@ -12,6 +12,8 @@ type ConversationListProps = {
   onSearchChange: (value: string) => void;
   onSetActiveFilter: (value: "all" | string) => void;
   onSelectConversation: (conversation: Conversation) => void;
+  onDeleteConversation: (conversation: Conversation) => void;
+  deletingConversationId: number | null;
 };
 
 export function ConversationList({
@@ -24,6 +26,8 @@ export function ConversationList({
   onSearchChange,
   onSetActiveFilter,
   onSelectConversation,
+  onDeleteConversation,
+  deletingConversationId,
 }: ConversationListProps) {
   return (
     <div className="inbox-list">
@@ -81,14 +85,24 @@ export function ConversationList({
           </div>
         ) : (
           conversations.map((conversation) => (
-            <button
+            <div
               key={conversation.id}
               className={`conversation-item ${selectedId === conversation.id ? "active" : ""}`}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => onSelectConversation(conversation)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelectConversation(conversation);
+                }
+              }}
             >
               <span className={`contact-avatar ${conversation.channel}`}>
-                {conversation.title.slice(0, 1).toUpperCase()}
+                <span className="avatar-letter">
+                  {conversation.title.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="avatar-presence" aria-hidden="true" />
               </span>
               <span className="conversation-copy">
                 <span className="conversation-title">
@@ -103,7 +117,30 @@ export function ConversationList({
                   )}
                 </span>
               </span>
-            </button>
+              <span
+                className="conversation-delete-wrap"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  className="conversation-delete"
+                  type="button"
+                  aria-label={`Delete chat with ${conversation.title}`}
+                  title={
+                    deletingConversationId === conversation.id ? "Deleting chat" : "Delete chat"
+                  }
+                  disabled={deletingConversationId !== null}
+                  onClick={() => onDeleteConversation(conversation)}
+                >
+                  {deletingConversationId === conversation.id ? (
+                    <span className="delete-spinner" aria-hidden="true" />
+                  ) : (
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M5 7h14M10 11v6M14 11v6M9 7V5h6v2m-8 0 1 13h8l1-13" />
+                    </svg>
+                  )}
+                </button>
+              </span>
+            </div>
           ))
         )}
       </div>

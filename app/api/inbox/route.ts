@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { requireLocalUser } from "@/lib/server/auth";
-import { getConnections, pollTelegramBot, syncTelegramPersonal } from "@/lib/server/connections";
+import {
+  ensureTelegramBotWebhook,
+  getConnections,
+  isTelegramWebhookEnabled,
+  pollTelegramBot,
+  syncTelegramPersonal,
+} from "@/lib/server/connections"; // TODO: remove polling after personal Telegram listener exists.
 import { database, type StoredConnection } from "@/lib/server/database";
 import { listConversations, listMessages, markConversationRead } from "@/lib/server/messages";
 
@@ -18,7 +24,10 @@ export async function GET(request: Request) {
     const syncWarnings: string[] = [];
     for (const connection of connectionRows) {
       try {
-        if (connection.kind === "telegram-bot") await pollTelegramBot(connection);
+        if (connection.kind === "telegram-bot") {
+          if (isTelegramWebhookEnabled()) await ensureTelegramBotWebhook(connection);
+          else await pollTelegramBot(connection);
+        }
         if (connection.kind === "telegram-personal") await syncTelegramPersonal(connection);
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Unknown sync error.";

@@ -29,8 +29,19 @@ export function ConnectionModal({
         if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
-      <section className="connect-modal" role="dialog" aria-modal="true" aria-labelledby="connect-title">
-        <button className="modal-close" type="button" aria-label="Close" onClick={onClose} disabled={busy}>
+      <section
+        className="connect-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="connect-title"
+      >
+        <button
+          className="modal-close"
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          disabled={busy}
+        >
           ×
         </button>
         <p className="eyebrow">ACCOUNT CONNECTION</p>
@@ -68,7 +79,12 @@ export function ConnectionModal({
         {modalKind === "telegram-bot" && (
           <form className="connect-form" onSubmit={onSubmitConnection}>
             <p>Paste the bot token from BotFather. Messages sent to the bot will be synced.</p>
-            <a className="tutorial-link" href="/guide#telegram-bot" target="_blank" rel="noreferrer">
+            <a
+              className="tutorial-link"
+              href="/guide#telegram-bot"
+              target="_blank"
+              rel="noreferrer"
+            >
               How to connect a Telegram bot ↗
             </a>
             <label>
@@ -92,7 +108,12 @@ export function ConnectionModal({
             {!telegramPendingId ? (
               <>
                 <p>Sign in to your personal Telegram account using Telegram’s client API.</p>
-                <a className="tutorial-link" href="/guide#telegram-personal" target="_blank" rel="noreferrer">
+                <a
+                  className="tutorial-link"
+                  href="/guide#telegram-personal"
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   How to connect personal Telegram ↗
                 </a>
                 <label>

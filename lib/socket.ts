@@ -1,7 +1,9 @@
 declare global {
-  var __buroqSocketIo: {
-    emit: (event: string, ...args: unknown[]) => void;
-  } | undefined;
+  var __buroqSocketIo:
+    | {
+        emit: (event: string, ...args: unknown[]) => void;
+      }
+    | undefined;
 }
 
 export function getSocketServer() {
