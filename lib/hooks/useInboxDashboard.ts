@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type SubmitEvent } from "react";
+import { useEffect, useMemo, useState, type SubmitEvent } from "react";
 import { useRouter } from "next/navigation";
 import { io } from "socket.io-client";
 
@@ -7,6 +7,7 @@ import { useInboxStore } from "@/lib/store/useInboxStore";
 
 export function useInboxDashboard() {
   const router = useRouter();
+  const [deletingConversationId, setDeletingConversationId] = useState<number | null>(null);
   const {
     connections,
     conversations,
@@ -23,6 +24,9 @@ export function useInboxDashboard() {
     deleteAccountOpen,
     deletePassword,
     deleteError,
+    ngrokStatus,
+    ngrokLoading,
+    ngrokModalOpen,
     setActiveFilter,
     setBusy,
     setDeleteAccountOpen,
@@ -34,8 +38,15 @@ export function useInboxDashboard() {
     setSearch,
     setTelegramNeedsPassword,
     setTelegramPendingId,
+    setNgrokModalOpen,
     resetTelegramFlow,
     refresh,
+    refreshNgrokStatus,
+    startNgrok,
+    stopNgrok,
+    syncTelegramWebhooks,
+    saveWebhookSettings,
+    testWhatsAppWebhook,
     selectConversation: selectInboxConversation,
   } = useInboxStore();
 
@@ -207,6 +218,28 @@ export function useInboxDashboard() {
     }
   }
 
+  async function deleteConversation(conversation: { id: number; title: string }) {
+    if (deletingConversationId !== null) return;
+    if (
+      !window.confirm(
+        `Delete chat with ${conversation.title}? All stored messages will be deleted.`,
+      )
+    )
+      return;
+    setDeletingConversationId(conversation.id);
+    setError("");
+    try {
+      const response = await fetch(`/api/conversations/${conversation.id}`, { method: "DELETE" });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Chat could not be deleted.");
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Chat could not be deleted.");
+    } finally {
+      setDeletingConversationId(null);
+    }
+  }
+
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.refresh();
@@ -291,9 +324,21 @@ export function useInboxDashboard() {
     submitConnection,
     sendReply,
     deleteMessage,
+    deleteConversation,
+    deletingConversationId,
     signOut,
     deleteAccount,
     disconnect,
     selectConversation: selectInboxConversation,
+    ngrokStatus,
+    ngrokLoading,
+    ngrokModalOpen,
+    setNgrokModalOpen,
+    refreshNgrokStatus,
+    startNgrok,
+    stopNgrok,
+    syncTelegramWebhooks,
+    saveWebhookSettings,
+    testWhatsAppWebhook,
   };
 }

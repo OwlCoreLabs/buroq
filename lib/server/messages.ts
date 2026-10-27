@@ -192,3 +192,15 @@ export function deleteStoredMessage(messageId: number) {
   emitInboxUpdate();
   return message;
 }
+
+export function deleteStoredConversation(conversationId: number) {
+  const media = database()
+    .prepare(
+      "SELECT media_url AS mediaUrl FROM messages WHERE conversation_id = ? AND media_url IS NOT NULL",
+    )
+    .all(conversationId) as Array<{ mediaUrl: string }>;
+  const deleted = database().prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
+  if (deleted.changes === 0) return null;
+  emitInboxUpdate();
+  return media.map(({ mediaUrl }) => mediaUrl);
+}

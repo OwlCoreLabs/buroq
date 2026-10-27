@@ -49,7 +49,8 @@ export function ConversationDetail({
     <div className="conversation-detail">
       <header className="detail-header">
         <span className={`contact-avatar detail-avatar ${conversation.channel}`}>
-          {conversation.title.slice(0, 1).toUpperCase()}
+          <span className="avatar-letter">{conversation.title.slice(0, 1).toUpperCase()}</span>
+          <span className="avatar-presence" aria-hidden="true" />
         </span>
         <div className="detail-contact">
           <strong>{conversation.title}</strong>
@@ -86,10 +87,14 @@ export function ConversationDetail({
                     <button
                       className="message-delete"
                       type="button"
+                      aria-label="Delete message"
+                      title="Delete message"
                       onClick={() => onDeleteMessage(message.id)}
                       disabled={busy}
                     >
-                      Delete
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M5 7h14M10 11v6M14 11v6M9 7V5h6v2m-8 0 1 13h8l1-13" />
+                      </svg>
                     </button>
                   )}
                 </div>

@@ -14,8 +14,68 @@ import {
 } from "./database";
 import { saveImage } from "./media";
 import { saveMessage } from "./messages";
+import { getActiveTunnelUrl, getTelegramWebhookSecret } from "./ngrok";
 
-type ConnectionCredentials = Record<string, string | number>;
+type ConnectionCredentials = Record<string, string | number | boolean>;
+
+type TelegramBotUpdate = {
+  update_id?: number;
+  message?: {
+    message_id?: number;
+    date?: number;
+    text?: string;
+    caption?: string;
+
+    photo?: Array<{
+      file_id: string;
+      width: number;
+      height: number;
+      file_size?: number;
+    }>;
+
+    document?: {
+      file_id: string;
+      file_name?: string;
+      mime_type?: string;
+      file_size?: number;
+    };
+
+    chat?: {
+      id?: number;
+      title?: string;
+      username?: string;
+      first_name?: string;
+    };
+
+    from?: {
+      username?: string;
+      first_name?: string;
+      last_name?: string;
+    };
+  };
+};
+
+export function isTelegramWebhookEnabled() {
+  return Boolean(telegramWebhookConfig("check"));
+}
+
+function telegramWebhookConfig(connectionId: string) {
+  const activeTunnel = getActiveTunnelUrl();
+  const baseUrl = (activeTunnel || process.env.TELEGRAM_WEBHOOK_BASE_URL)?.replace(/\/+$/, "");
+  if (!baseUrl) return null;
+  if (!/^https:\/\//i.test(baseUrl)) {
+    throw new Error("TELEGRAM_WEBHOOK_BASE_URL must use HTTPS.");
+  }
+
+  const secret = getTelegramWebhookSecret();
+  if (!secret || !/^[A-Za-z0-9_-]{1,256}$/.test(secret)) {
+    throw new Error("Set TELEGRAM_WEBHOOK_SECRET when TELEGRAM_WEBHOOK_BASE_URL is configured.");
+  }
+  return {
+    url: `${baseUrl}/api/webhooks/telegram/${connectionId}`,
+    secret,
+  };
+}
 
 export function getConnection(id: string) {
   return database()
@@ -89,7 +149,11 @@ export async function connectWhatsAppBusiness(phoneNumberId: string, accessToken
   });
 }
 
-async function telegramBotRequest<T>(token: string, method: string, body?: unknown): Promise<T> {
+export async function telegramBotRequest<T>(
+  token: string,
+  method: string,
+  body?: unknown,
+): Promise<T> {
   const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json" } : undefined,
@@ -110,17 +174,163 @@ async function telegramBotRequest<T>(token: string, method: string, body?: unkno
 export async function connectTelegramBot(token: string) {
   if (token.length < 30 || token.length > 256) throw new Error("Enter a valid Telegram bot token.");
   const bot = await telegramBotRequest<{ id: number; username?: string }>(token, "getMe");
+  const webhook = telegramWebhookConfig("pending");
   const hook = await telegramBotRequest<{ url: string }>(token, "getWebhookInfo");
-  if (hook.url) {
+  if (!webhook && hook.url) {
     throw new Error(
-      "This bot already has a webhook configured. Remove it in your Telegram bot setup before using local polling.",
+      "This bot already has a webhook configured. Remove it in Telegram or configure TELEGRAM_WEBHOOK_BASE_URL.",
     );
   }
 
-  return storeConnection({
+  const id = storeConnection({
     kind: "telegram-bot",
     label: bot.username ? `@${bot.username}` : "Telegram bot",
     credentials: { token, botId: bot.id, offset: 0 },
+  });
+  const configuredWebhook = telegramWebhookConfig(id);
+  if (configuredWebhook) {
+    try {
+      await telegramBotRequest(token, "setWebhook", {
+        url: configuredWebhook.url,
+        secret_token: configuredWebhook.secret,
+        allowed_updates: ["message"],
+      });
+    } catch (error) {
+      database().prepare("DELETE FROM connections WHERE id = ?").run(id);
+      throw error;
+    }
+  }
+  return id;
+}
+
+export async function ensureTelegramBotWebhook(connection: StoredConnection) {
+  if (connection.kind !== "telegram-bot") return;
+  const webhook = telegramWebhookConfig(connection.id);
+  if (!webhook) return;
+
+  const credentials = readCredentials<{ token: string }>(connection);
+  const hook = await telegramBotRequest<{ url?: string }>(credentials.token, "getWebhookInfo");
+  if (hook.url === webhook.url) {
+    await telegramBotRequest(credentials.token, "setWebhook", {
+      url: webhook.url,
+      secret_token: webhook.secret,
+      allowed_updates: ["message"],
+    });
+    return;
+  }
+
+  await telegramBotRequest(credentials.token, "setWebhook", {
+    url: webhook.url,
+    secret_token: webhook.secret,
+    allowed_updates: ["message"],
+  });
+}
+
+export async function receiveTelegramBotUpdate(
+  connection: StoredConnection,
+  update: TelegramBotUpdate,
+) {
+  const message = update.message;
+
+  if (message?.message_id == null || message.date == null || message.chat?.id == null) {
+    return;
+  }
+
+  const name =
+    message.chat.title ||
+    [message.from?.first_name, message.from?.last_name].filter(Boolean).join(" ") ||
+    (message.from?.username ? `@${message.from.username}` : String(message.chat.id));
+
+  let body = message.text || message.caption || "";
+  let mediaPath: string | undefined;
+  let mediaMimeType: string | undefined;
+  let mediaName: string | undefined;
+
+  const credentials = readCredentials<{ token: string }>(connection);
+
+  if (message.photo?.length) {
+    const photo = message.photo[message.photo.length - 1];
+    try {
+      const fileInfo = await telegramBotRequest<{ file_path?: string }>(
+        credentials.token,
+        "getFile",
+        { file_id: photo.file_id },
+      );
+      if (fileInfo.file_path) {
+        const response = await fetch(
+          `https://api.telegram.org/file/bot${credentials.token}/${fileInfo.file_path}`,
+          { cache: "no-store" },
+        );
+        if (response.ok) {
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const ext = fileInfo.file_path.split(".").pop()?.toLowerCase() ?? "jpg";
+          const mime =
+            ext === "png"
+              ? "image/png"
+              : ext === "gif"
+                ? "image/gif"
+                : ext === "webp"
+                  ? "image/webp"
+                  : "image/jpeg";
+          mediaPath = await saveImage(buffer, mime);
+          mediaMimeType = mime;
+          mediaName = "photo";
+        }
+      }
+    } catch (err) {
+      console.error("Failed to download Telegram bot photo:", err);
+    }
+    if (!mediaPath) {
+      // Fallback: store file_id as text if download failed
+      body = `[Telegram photo: ${photo.file_id}]${body ? `\n${body}` : ""}`;
+    }
+  } else if (message.document) {
+    const document = message.document;
+    const isImage = document.mime_type?.startsWith("image/");
+    if (isImage && document.mime_type) {
+      try {
+        const fileInfo = await telegramBotRequest<{ file_path?: string }>(
+          credentials.token,
+          "getFile",
+          { file_id: document.file_id },
+        );
+        if (fileInfo.file_path) {
+          const response = await fetch(
+            `https://api.telegram.org/file/bot${credentials.token}/${fileInfo.file_path}`,
+            { cache: "no-store" },
+          );
+          if (response.ok) {
+            const buffer = Buffer.from(await response.arrayBuffer());
+            mediaPath = await saveImage(buffer, document.mime_type);
+            mediaMimeType = document.mime_type;
+            mediaName = document.file_name ?? "image";
+          }
+        }
+      } catch (err) {
+        console.error("Failed to download Telegram bot document image:", err);
+      }
+    }
+    if (!mediaPath) {
+      body = `[Telegram ${isImage ? "image" : "document"}: ${document.file_id}]${
+        body ? `\n${body}` : ""
+      }`;
+    }
+  }
+
+  if (!body && !mediaPath) return;
+
+  saveMessage({
+    connectionId: connection.id,
+    providerChatId: String(message.chat.id),
+    title: name,
+    handle: message.from?.username ? `@${message.from.username}` : "",
+    providerMessageId: String(message.message_id),
+    body: body || (mediaPath ? "" : ""),
+    direction: "inbound",
+    createdAt: message.date * 1000,
+    mediaUrl: mediaPath,
+    mediaMimeType,
+    mediaName,
   });
 }
 
@@ -562,6 +772,10 @@ export async function pollTelegramBot(connection: StoredConnection) {
 }
 
 export async function disconnectConnection(connection: StoredConnection) {
+  if (connection.kind === "telegram-bot") {
+    const credentials = readCredentials<{ token: string }>(connection);
+    await telegramBotRequest(credentials.token, "deleteWebhook");
+  }
   if (connection.kind === "telegram-personal" && connection.status === "connected") {
     const credentials = readCredentials<{ session: string }>(connection);
     const client = telegramClient(credentials.session);

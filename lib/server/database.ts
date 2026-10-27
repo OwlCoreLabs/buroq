@@ -35,6 +35,11 @@ function getDatabase() {
       expires_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS connections (
       id TEXT PRIMARY KEY,
       kind TEXT NOT NULL CHECK (kind IN (
@@ -147,3 +152,22 @@ export type StoredConnection = {
   credentials: string;
   status: string;
 };
+
+export function getSetting(key: string): string | undefined {
+  const row = database().prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+    { value: string } | undefined;
+  return row?.value;
+}
+
+export function setSetting(key: string, value: string): void {
+  database()
+    .prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
+    .run(key, value);
+}
+
+export function deleteSetting(key: string): void {
+  database().prepare("DELETE FROM settings WHERE key = ?").run(key);
+}

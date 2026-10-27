@@ -12,9 +12,10 @@ Use Node.js 20.19+, 22.13+, or 24+ and Yarn Classic:
 
 ```bash
 yarn install
-cp .env.example .env.local
 yarn dev
 ```
+
+Configure local secrets in `.env.local`.
 
 Open [http://localhost:3000](http://localhost:3000). On first run, create a
 username and a password of at least 1 character. Save the one-time recovery
@@ -50,9 +51,16 @@ the webhook is configured; it does not import older messages.
 
 Create a bot using Telegram's BotFather, then enter its token in Buroq under
 **Telegram bot**. Buroq verifies the token and reads updates using Telegram's
-Bot API. The bot must not already have a webhook configured because this local
-setup uses polling. A bot only receives conversations sent to that bot; it
-cannot read the bot owner's personal Telegram history.
+Bot API.
+
+For instant updates, set `TELEGRAM_WEBHOOK_BASE_URL` and
+`TELEGRAM_WEBHOOK_SECRET` in `.env.local`. The base URL must be public HTTPS;
+the secret must be URL-safe. Buroq registers a webhook for each connected bot
+and receives messages at `/api/webhooks/telegram/<connection-id>`. Without
+these variables, Buroq uses polling when the inbox refreshes.
+
+A bot only receives conversations sent to that bot; it cannot read the bot
+owner's personal Telegram history.
 
 ### Personal Telegram account
 

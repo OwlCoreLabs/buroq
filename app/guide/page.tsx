@@ -117,10 +117,11 @@ WHATSAPP_APP_SECRET=your-meta-app-secret`}</code>
             </li>
           </ol>
           <p className="guide-notice">
-            This app uses Telegram polling. The bot cannot already be using a webhook with another
-            service; remove that webhook before connecting if you want to move the bot here.
-            Removing it can interrupt the other service. Bot updates are fetched when the inbox is
-            refreshed.
+            Set <code>TELEGRAM_WEBHOOK_BASE_URL</code> and <code>TELEGRAM_WEBHOOK_SECRET</code> in
+            <code>.env.local</code> before connecting a bot. Buroq registers a public HTTPS webhook
+            for each connected bot, so incoming text messages arrive immediately. Without these
+            variables, Buroq uses polling when the inbox refreshes. Do not expose the webhook or
+            secret publicly.
           </p>
           <p>
             Reference:{" "}

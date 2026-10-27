@@ -34,6 +34,8 @@ yarn-error.log*
 .env*
 !.env.example
 
+problem.md
+
 # local database and encryption key
 /data/
 
@@ -43,5 +45,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+guide_webhook_ngrok.md
+config_realtime.md
 
 

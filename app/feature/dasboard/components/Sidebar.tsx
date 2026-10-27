@@ -54,9 +54,7 @@ export function Sidebar({
             <button
               className={`account-filter ${activeFilter === connection.id ? "active" : ""}`}
               type="button"
-              onClick={() =>
-                onSelectFilter(activeFilter === connection.id ? "all" : connection.id)
-              }
+              onClick={() => onSelectFilter(activeFilter === connection.id ? "all" : connection.id)}
             >
               <span>{connection.label}</span>
               <small>{channelLabels[connection.kind]}</small>
